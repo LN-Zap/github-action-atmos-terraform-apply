@@ -403,8 +403,8 @@ runs:
             --stack ${{ inputs.stack }} \
             -input=false \
             -no-color \
-            --orig ${{ steps.vars.outputs.retrieved_plan_filename }} \
-            --new ${{ steps.vars.outputs.renewed_plan_filename }} \
+            --orig ${{ steps.vars.outputs.retrieved_plan_file }} \
+            --new ${{ steps.vars.outputs.renewed_plan_file }} \
             --skip-init \
           > ${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}
           
