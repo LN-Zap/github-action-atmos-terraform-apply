@@ -522,7 +522,6 @@ runs:
             -input=false \
             -no-color \
             --planfile ${{ steps.vars.outputs.renewed_plan_filename }} \
-            --skip-init \
         &> ${TERRAFORM_OUTPUT_FILE}
         
         TERRAFORM_RESULT=$?
