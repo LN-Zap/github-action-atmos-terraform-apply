@@ -51,6 +51,14 @@ inputs:
     description: "Enable plan storage. Default: 'true'. Set to 'false' to disable plan storage."
     required: false
     default: 'true'
+  install-atmos:
+    description: "Whether to install atmos. Set to 'false' if atmos is already available on the runner."
+    required: false
+    default: 'true'
+  install-terraform:
+    description: "Whether to install terraform/opentofu via aqua. Set to 'false' if terraform is already available on the runner."
+    required: false
+    default: 'true'
 outputs:
   status:
     description: Apply Status. Either 'succeeded' or 'failed'
@@ -74,6 +82,7 @@ runs:
         echo "ATMOS_CLI_CONFIG_PATH=$(realpath ${{ inputs.atmos-config-path }})" >> $GITHUB_ENV
 
     - name: Install Atmos
+      if: ${{ inputs.install-atmos != 'false' }}
       uses: cloudposse/github-action-setup-atmos@v2
       with:
         atmos-version: ${{ inputs.atmos-version }}
@@ -186,23 +195,69 @@ runs:
             settingsPath: settings.integrations.github.gitops.artifact-storage.gcp-firestore-collection-name
             outputPath: gcp-firestore-collection-name
 
+    - name: Add Terraform, OpenTofu, tfcmt and terraform-docs to Aqua
+      shell: bash
+      run: |
+        cat << EOF > aqua.yaml
+        registries:
+          - type: standard
+            ref: v4.233.0
+        packages:
+          - name: suzuki-shunsuke/tfcmt@v4.14.5
+          - name: terraform-docs/terraform-docs@v0.20.0
+        EOF
+
+        # Skip terraform/opentofu install if already available on the runner
+        if [[ "${{ inputs.install-terraform }}" == "false" ]]; then
+          echo "Skipping terraform/opentofu install (install-terraform: false)"
+        else
+          # Add Terraform if specified
+          if [[ "${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version }}" != "" && "${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version }}" != "null" ]]; then
+            VERSION="${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version }}"
+            if [[ ! "$VERSION" =~ ^v ]]; then
+              VERSION="v$VERSION"
+            fi
+            echo "  - name: hashicorp/terraform@$VERSION" >> aqua.yaml
+          fi
+
+          # Add OpenTofu if specified
+          if [[ "${{ fromJson(steps.atmos-settings.outputs.settings).opentofu-version }}" != "" && "${{ fromJson(steps.atmos-settings.outputs.settings).opentofu-version }}" != "null" ]]; then
+            VERSION="${{ fromJson(steps.atmos-settings.outputs.settings).opentofu-version }}"
+            if [[ ! "$VERSION" =~ ^v ]]; then
+              VERSION="v$VERSION"
+            fi
+            echo "  - name: opentofu/opentofu@$VERSION" >> aqua.yaml
+          fi
+        fi
+
+        # Debug output if debug is enabled
+        if [[ "${{ inputs.debug }}" == "true" ]]; then
+          echo "Generated aqua.yaml:"
+          cat aqua.yaml
+        fi
+
+    - name: Cache Aqua
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ~/.local/share/aquaproj-aqua
+        key: v2-aqua-installer-${{runner.os}}-${{runner.arch}}-${{hashFiles('aqua.yaml')}}
+        restore-keys: |
+          v2-aqua-installer-${{runner.os}}-${{runner.arch}}-
+
+    - name: Install dependencies with Aqua
+      uses: aquaproj/aqua-installer@5e54e5cee8a95ee2ce7c04cb993da6dfad13e59c # v3.1.2
+      with:
+        aqua_version: v2.50.0
+      env:
+        AQUA_CONFIG: aqua.yaml
+        AQUA_LOG_LEVEL: debug
+
     - name: Install Terraform
-      if: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version != '' && fromJson(steps.atmos-settings.outputs.settings).terraform-version != 'null' }}
+      if: ${{ inputs.install-terraform != 'false' && fromJson(steps.atmos-settings.outputs.settings).terraform-version != '' && fromJson(steps.atmos-settings.outputs.settings).terraform-version != 'null' }}
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version }}
         terraform_wrapper: false
-
-    - name: Install Dependencies
-      uses: cloudposse-github-actions/install-gh-releases@v1
-      with:
-        cache: true
-        config: |-
-          opentofu/opentofu: 
-            tag: ${{ startsWith(fromJson(steps.atmos-settings.outputs.settings).opentofu-version, 'v') && fromJson(steps.atmos-settings.outputs.settings).opentofu-version || format('v{0}', fromJson(steps.atmos-settings.outputs.settings).opentofu-version) }}
-            skip: ${{ fromJson(steps.atmos-settings.outputs.settings).opentofu-version == '' || fromJson(steps.atmos-settings.outputs.settings).opentofu-version == 'null' }}
-          suzuki-shunsuke/tfcmt: v4.14.0
-          terraform-docs/terraform-docs: v0.20.0
 
     - name: Configure Plan AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
