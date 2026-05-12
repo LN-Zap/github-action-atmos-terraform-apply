@@ -81,6 +81,8 @@ this action. For more on setting up those components, see the [`gitops` componen
 
 The action expects the atmos configuration file `atmos.yaml` to be present in the repository.
 
+By default, the action installs Atmos `1.217.0`.
+
 The action supports AWS and Azure to store Terraform plan files. 
 You can read more about plan storage in the [cloudposse/github-action-terraform-plan-storage](https://github.com/cloudposse/github-action-terraform-plan-storage?tab=readme-ov-file#aws-default) documentation. 
 Depends of cloud provider the following fields should be set in the `atmos.yaml`:
@@ -223,6 +225,7 @@ We recommend combining this action with the [`affected-stacks`](https://atmos.to
             component: "foobar"
             stack: "plat-ue2-sandbox"
             atmos-config-path: ./rootfs/usr/local/etc/atmos/
+            atmos-version: 1.217.0
 ```
 ### Migrating from `v4` to `v5`
 
