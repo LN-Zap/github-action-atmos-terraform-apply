@@ -60,13 +60,13 @@ runs:
   using: "composite"
   steps:
     - name: Install Node
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: 20
 
     - name: Checkout
       if: ${{ inputs.skip-checkout != 'true' }}
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set atmos cli config path vars
       shell: bash
@@ -74,7 +74,7 @@ runs:
         echo "ATMOS_CLI_CONFIG_PATH=$(realpath ${{ inputs.atmos-config-path }})" >> $GITHUB_ENV
 
     - name: Install Atmos
-      uses: cloudposse/github-action-setup-atmos@v2
+      uses: cloudposse/github-action-setup-atmos@v3
       with:
         atmos-version: ${{ inputs.atmos-version }}
         token: ${{ inputs.token }}
@@ -188,7 +188,7 @@ runs:
 
     - name: Install Terraform
       if: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version != '' && fromJson(steps.atmos-settings.outputs.settings).terraform-version != 'null' }}
-      uses: hashicorp/setup-terraform@v3
+      uses: hashicorp/setup-terraform@v4
       with:
         terraform_version: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-version }}
         terraform_wrapper: false
@@ -205,7 +205,7 @@ runs:
           terraform-docs/terraform-docs: v0.20.0
 
     - name: Configure Plan AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       if: ${{ fromJson(steps.atmos-settings.outputs.settings).aws-region != '' &&
           fromJson(steps.atmos-settings.outputs.settings).aws-region != 'null' &&
           fromJson(steps.atmos-settings.outputs.settings).terraform-apply-role != '' &&
@@ -214,7 +214,7 @@ runs:
         aws-region: ${{ fromJson(steps.atmos-settings.outputs.settings).aws-region }}
         role-to-assume: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-apply-role }}
         role-session-name: "atmos-terraform-apply-gitops"
-        mask-aws-account-id: "no"
+        mask-aws-account-id: "false"
 
     - name: Define Job Control State Variables
       shell: bash
@@ -272,7 +272,7 @@ runs:
         echo "lock_file=$LOCK_FILE" >> $GITHUB_OUTPUT
 
     - name: Configure Plan Storage AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       if: ${{ ( fromJson(steps.atmos-settings.outputs.settings).plan-repository-type == 's3' ||
                 fromJson(steps.atmos-settings.outputs.settings).plan-repository-type == ''  ||
                 fromJson(steps.atmos-settings.outputs.settings).plan-repository-type == 'null' ) &&
@@ -286,7 +286,7 @@ runs:
         aws-region: ${{ fromJson(steps.atmos-settings.outputs.settings).aws-region }}
         role-to-assume: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-state-role }}
         role-session-name: "atmos-terraform-state-gitops"
-        mask-aws-account-id: "no"
+        mask-aws-account-id: "false"
 
     - name: Retrieve Plan
       if: ${{ env.ACTIONS_ENABLED == 'true' && inputs.plan-storage == 'true'}}
@@ -335,7 +335,7 @@ runs:
         gcpFirestoreCollectionName: ${{ fromJson(steps.atmos-settings.outputs.settings).gcp-firestore-collection-name }}
 
     - name: Configure Plan AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       if: ${{ fromJson(steps.atmos-settings.outputs.settings).aws-region != '' &&
         fromJson(steps.atmos-settings.outputs.settings).aws-region != 'null' &&
         fromJson(steps.atmos-settings.outputs.settings).terraform-apply-role != '' &&
@@ -344,11 +344,11 @@ runs:
         aws-region: ${{ fromJson(steps.atmos-settings.outputs.settings).aws-region }}
         role-to-assume: ${{ fromJson(steps.atmos-settings.outputs.settings).terraform-apply-role }}
         role-session-name: "atmos-terraform-apply-gitops"
-        mask-aws-account-id: "no"
+        mask-aws-account-id: "false"
 
     - name: Cache .terraform
       id: cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       if: env.ACTIONS_ENABLED == 'true'
       with:
         path: |
@@ -439,7 +439,7 @@ runs:
 
     - name: Setup Infracost
       if: env.INFRACOST_ENABLED == 'true' && steps.plan-diff.outputs.plan_changed == 'false'
-      uses: infracost/actions/setup@v3
+      uses: infracost/actions/setup@v4
       with:
         api-key: ${{ inputs.infracost-api-key }}
 
