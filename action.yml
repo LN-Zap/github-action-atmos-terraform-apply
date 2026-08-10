@@ -396,6 +396,7 @@ runs:
         fi
 
         TERRAFORM_PLAN_DIFF_OUTPUT_FILE="./terraform-${GITHUB_RUN_ID}-plan-diff-output.txt"
+        TERRAFORM_PLAN_DIFF_STDERR_FILE="./terraform-${GITHUB_RUN_ID}-plan-diff-stderr.txt"
 
         if [[ "${{ inputs.plan-storage }}" == "true" ]]; then
 
@@ -406,8 +407,8 @@ runs:
             --orig ${{ steps.vars.outputs.retrieved_plan_file }} \
             --new ${{ steps.vars.outputs.renewed_plan_file }} \
             --skip-init \
-          > ${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}
-          
+          > ${TERRAFORM_PLAN_DIFF_OUTPUT_FILE} 2> ${TERRAFORM_PLAN_DIFF_STDERR_FILE}
+
           PLAN_CHANGED=$?
         fi
 
@@ -415,6 +416,34 @@ runs:
           echo "plan_changed=false" >> $GITHUB_OUTPUT
         else
           echo "plan_changed=true" >> $GITHUB_OUTPUT
+
+          # Echo the diff to the JOB LOG, not only to $GITHUB_STEP_SUMMARY.
+          #
+          # Step summaries are not retrievable through the REST or Checks API and are
+          # not included in downloaded run logs — they render on the run page only.
+          # So when this gate blocked an apply, the only thing an operator or a script
+          # could see was `Error: plan files have differences` on stderr, with no
+          # indication of WHAT differed. That makes a legitimate safety gate
+          # undiagnosable, which in turn trains people to re-run past it.
+          #
+          # stdout carries the diff; stderr carries atmos's own error line. Both are
+          # now captured and echoed.
+          echo "::group::atmos terraform plan-diff — stored plan vs freshly generated plan"
+          if [[ -s "${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}" ]]; then
+            cat "${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}"
+          else
+            echo "(no diff written to stdout by 'atmos terraform plan-diff')"
+            echo "orig: ${{ steps.vars.outputs.retrieved_plan_file }}"
+            echo "new:  ${{ steps.vars.outputs.renewed_plan_file }}"
+          fi
+          echo "::endgroup::"
+
+          if [[ -s "${TERRAFORM_PLAN_DIFF_STDERR_FILE}" ]]; then
+            echo "::group::atmos terraform plan-diff — stderr"
+            cat "${TERRAFORM_PLAN_DIFF_STDERR_FILE}"
+            echo "::endgroup::"
+          fi
+
           cp ${GITHUB_ACTION_PATH}/config/atmos_plan_diff_github_summary.md ./atmos-apply-summary.md
           COMPONENT_NAME=$(echo "${{ inputs.component }}" | sed 's#/#\\/#g')
           sed -i "s/{{COMPONENT_NAME}}/${COMPONENT_NAME}/g" ./atmos-apply-summary.md
