@@ -418,7 +418,13 @@ runs:
           # is touching. Compare exactly that surface. Anything terraform intends to
           # create, update, replace or destroy carries a non-no-op action and is still
           # compared, so drift that produces a real planned change is still caught.
+          # Atmos populates `command` (default "terraform"), but fall back rather than
+          # invoke an empty string: that would fail closed below and block every apply
+          # with a confusing error instead of an obvious one.
           TF_CMD="${{ fromJson(steps.atmos-settings.outputs.settings).command }}"
+          if [[ -z "${TF_CMD}" || "${TF_CMD}" == "null" ]]; then
+            TF_CMD="terraform"
+          fi
           PLAN_FINGERPRINT_JQ='{
             changes: [ .resource_changes[]?
                        | select(.mode != "data")
