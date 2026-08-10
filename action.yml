@@ -399,16 +399,91 @@ runs:
 
         if [[ "${{ inputs.plan-storage }}" == "true" ]]; then
 
-          atmos terraform plan-diff ${{ inputs.component }} \
-            --stack ${{ inputs.stack }} \
-            -input=false \
-            -no-color \
-            --orig ${{ steps.vars.outputs.retrieved_plan_file }} \
-            --new ${{ steps.vars.outputs.renewed_plan_file }} \
-            --skip-init \
-          > ${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}
-          
-          PLAN_CHANGED=$?
+          # Confirm the plan about to be applied is the plan that was reviewed.
+          #
+          # We deliberately do not use `atmos terraform plan-diff`. It builds its
+          # comparison set from prior_state + planned_values + resource_changes and
+          # applies no filter on change action, so every managed resource is compared
+          # whether or not the plan touches it. Any provider attribute that varies on
+          # read then makes a stored plan and a fresh re-plan of identical
+          # configuration differ by however long the apply took to start. Observed
+          # cases: `cloudflare_zone.development_mode` (a per-second countdown) and
+          # `cloudflare_certificate_pack.certificates[].uploaded_on` (returns the read
+          # time, while `modified_on` on the same object stays pinned). The gate then
+          # cannot pass for any change to those components.
+          # See LN-Zap/zap-infrastructure#2902.
+          #
+          # "The plan that was reviewed" is a statement about planned actions,
+          # variables and outputs -- not about the refreshed state of resources nobody
+          # is touching. Compare exactly that surface. Anything terraform intends to
+          # create, update, replace or destroy carries a non-no-op action and is still
+          # compared, so drift that produces a real planned change is still caught.
+          # Atmos populates `command` (default "terraform"), but fall back rather than
+          # invoke an empty string: that would fail closed below and block every apply
+          # with a confusing error instead of an obvious one.
+          TF_CMD="${{ fromJson(steps.atmos-settings.outputs.settings).command }}"
+          if [[ -z "${TF_CMD}" || "${TF_CMD}" == "null" ]]; then
+            TF_CMD="terraform"
+          fi
+          PLAN_FINGERPRINT_JQ='{
+            changes: [ .resource_changes[]?
+                       | select(.mode != "data")
+                       | select(.change.actions != ["no-op"])
+                       | {address, actions: .change.actions,
+                          after: .change.after,
+                          after_unknown: .change.after_unknown} ]
+                     | sort_by(.address),
+            variables: (.variables // {} | map_values(.value)),
+            outputs: (.output_changes // {}
+                      | with_entries(select(.value.actions != ["no-op"])))
+          }'
+
+          # Fail closed. If a read fails silently we would write an empty fingerprint,
+          # two empty fingerprints would compare equal, and the gate would pass while
+          # checking nothing. Treat empty or non-JSON output as an error.
+          plan_fingerprint() {
+            local plan_file="$1" dest="$2"
+            ( set -o pipefail
+              cd "${{ steps.vars.outputs.component_path }}" \
+                && "${TF_CMD}" show -json "${plan_file}" \
+                | jq -S "${PLAN_FINGERPRINT_JQ}" ) > "${dest}" 2>&1
+            local rc=$?
+            if [[ ${rc} -ne 0 ]] || [[ ! -s "${dest}" ]] || ! jq -e . "${dest}" >/dev/null 2>&1; then
+              echo "--- output while reading ${plan_file} ---"
+              cat "${dest}" 2>/dev/null | head -40
+              return 1
+            fi
+            return 0
+          }
+
+          ORIG_FINGERPRINT="./plan-fingerprint-orig-${GITHUB_RUN_ID}.json"
+          NEW_FINGERPRINT="./plan-fingerprint-new-${GITHUB_RUN_ID}.json"
+
+          if ! plan_fingerprint "${{ steps.vars.outputs.retrieved_plan_file }}" "${ORIG_FINGERPRINT}"; then
+            echo "::error title=Plan comparison failed::Could not read the stored plan. This is an execution error, not a plan difference."
+            exit 1
+          fi
+
+          if ! plan_fingerprint "${{ steps.vars.outputs.renewed_plan_file }}" "${NEW_FINGERPRINT}"; then
+            echo "::error title=Plan comparison failed::Could not read the freshly generated plan. This is an execution error, not a plan difference."
+            exit 1
+          fi
+
+          # 0 = identical, 2 = differs. Mirrors `atmos terraform plan-diff` so the
+          # exit code stays meaningful to anything downstream, and keeps an execution
+          # error (handled above, exit 1) distinguishable from a real difference.
+          if diff -u --label "reviewed plan" --label "plan to be applied" \
+               "${ORIG_FINGERPRINT}" "${NEW_FINGERPRINT}" \
+               > ${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}; then
+            PLAN_CHANGED=0
+          else
+            PLAN_CHANGED=2
+            # Also echo to the job log. Step summaries render only on the run page and
+            # are absent from the REST and Checks APIs and from downloaded run logs,
+            # which is what made the original failure undiagnosable.
+            echo "The plan to be applied differs from the plan that was reviewed:"
+            cat ${TERRAFORM_PLAN_DIFF_OUTPUT_FILE}
+          fi
         fi
 
         if [[ "${PLAN_CHANGED}" == "0" ]]; then
